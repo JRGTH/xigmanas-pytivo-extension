@@ -139,7 +139,7 @@ extension_upgrade()
 {
 	# Perform an online extension upgrade.
 	DATE=$(date +"%a %b %d %T %Y")
-	echo "Looking for new ${FULLAPPNAME} package!"
+	echo "Looking for new ${FULLAPPNAME} Extension package!"
 	mkdir -p ${CWDIR}/update
 	fetch -ao ${CWDIR}/update --no-verify-peer --timeout=30 ${VERFILE} || \
 	error_notify "Error: A problem has occurred while fetching version file."
@@ -149,7 +149,7 @@ extension_upgrade()
 		UPDATEVER=$(cat ${CWDIR}/update/version | tr -d .)
 		CURRENTVER=$(cat ${CWDIR}/version | tr -d .)
 		if [ "${UPDATEVER}" -gt "${CURRENTVER}" ]; then
-			echo "New ${FULLAPPNAME} package found, performing upgrade..."
+			echo "New ${FULLAPPNAME} Extension package found, performing upgrade..."
 			fetch -ao ${CWDIR}/update --no-verify-peer --timeout=30 ${GITURL} || \
 			error_notify "Error: A problem has occurred while fetching extension package."
 			tar -xf ${CWDIR}/update/*${BRANCH}.zip --exclude='.git*' --strip-components 1 -C ${CWDIR}/update
@@ -159,10 +159,10 @@ extension_upgrade()
 
 			# Logging the update event.
 			UPDATEVERSION=$(cat ${CWDIR}/version)
-			echo "${DATE}: ${FULLAPPNAME} upgraded to ${UPDATEVERSION}" >> ${EXTLOGFILE}
-			echo "${FULLAPPNAME} package upgrade completed!"
+			echo "${DATE}: ${FULLAPPNAME} Extension upgraded to ${UPDATEVERSION}" >> ${EXTLOGFILE}
+			echo "${FULLAPPNAME} Extension package upgrade completed!"
 		else
-			echo "${FULLAPPNAME} is on the latest version!"
+			echo "${FULLAPPNAME} Extension is on the latest version!"
 			rm -r ${CWDIR}/update
 		fi
 	fi
@@ -341,7 +341,7 @@ ext_enable_disable()
 pkg_upgrade()
 {
 	# Re-fetch pytivo package and extract.
-	echo "Preparing to overwrite current pytivo files, except configuration..."
+	echo "Preparing to overwrite current pytivo files, configuration will be preserved..."
 	pytivo_force_download
 
 	# Check for extension updates.
