@@ -1,0 +1,536 @@
+#!/bin/sh
+# pytivoinit
+# PyTivo add-on for NAS4Free/XigmaNAS Embedded x64 11.x and later.
+# (https://www.xigmanas.com/forums)
+# License: BSD2CLAUSE (BSD 2-clause Simplified License).
+# Debug script
+#set -x
+
+# Copyright (c) 2019 José Rivera (JoseMR)
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that following conditions are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS 'AS IS' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+# THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Set environment.
+PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
+
+# Determine full working directory.
+CWDIR=$(dirname $(realpath $0))
+
+# Global variables.
+PLATFORM=$(uname -m)
+PRODUCT=$(uname -i)
+PRDVERSION=$(uname -r | cut -d '-' -f1 | tr -d '.')
+PRDPLATFORM=$(cat /etc/platform)
+SCRIPTNAME=$(basename $0)
+CONFIG="/cf/conf/config.xml"
+APPNAME="pytivo"
+APPEXEC="pyTivo.py"
+PYTIVOVERSION="1.x"
+EXTLOGFILE="${CWDIR}/log/pytivo_ext.log"
+FULLAPPNAME="PyTivo"
+USRLOCAL="/usr/local"
+PYTIVOPATH="${CWDIR}/${APPNAME}"
+LOCALSHAREPATH="${USRLOCAL}/share"
+PYTHONCMD="${USRLOCAL}/bin/python2.7"
+WWWPATH="/usr/local/www"
+PYTIVOCONF="/conf/pytivo_config"
+PYTIVOCONFLINK="/var/etc/pytivoconf"
+BRANCH="master"
+PYTIVOURL="https://github.com/wmcbrine/pytivo/archive/master.zip"
+GITURL="https://github.com/JRGTH/xigmanas-${APPNAME}-extension/archive/${BRANCH}.zip"
+VERFILE="https://raw.githubusercontent.com/JRGTH/xigmanas-${APPNAME}-extension/${BRANCH}/version"
+
+error_notify()
+{
+	# Log/notify message on error and exit.
+	MSG="$*"
+	logger -t "${SCRIPTNAME}" "${MSG}"
+	echo -e "$*" >&2; exit 1
+}
+
+runtime_config()
+{
+	# Create required directories if missing.
+	if [ ! -d ${CWDIR}/conf ]; then
+		mkdir -p ${CWDIR}/conf
+	fi
+	if [ ! -d ${CWDIR}/log ]; then
+		mkdir -p ${CWDIR}/log
+	fi
+	if [ ! -d ${CWDIR}/locale-pytivo ]; then
+		mkdir -p ${CWDIR}/locale-pytivo
+	fi
+}
+
+pytivo_initial_download()
+{
+	# Check if pytivo already exist.
+	if [ ! -f ${PYTIVOPATH}/${APPEXEC} ]; then
+		# Fetch latest pytivo package.
+		echo "Fetching ${APPNAME} files..."
+		fetch -ao ${CWDIR}/master.zip --no-verify-peer --timeout=30 ${PYTIVOURL} || \
+		error_notify "Error: A problem has occurred while fetching ${APPNAME}."
+		pytivo_pkg_extract
+	fi
+}
+
+pytivo_force_download()
+{
+	# Check if pytivo already exist.
+	if [ -d ${PYTIVOPATH} ]; then
+		# Fetch latest pytivo package.
+		echo "Fetching ${APPNAME} files..."
+		fetch -ao ${CWDIR}/master.zip --no-verify-peer --timeout=30 ${PYTIVOURL} || \
+		error_notify "Error: A problem has occurred while fetching ${APPNAME}."
+		pytivo_pkg_extract
+	fi
+}
+
+pytivo_pkg_extract()
+{
+	# Extract pytivo script from package.
+	if [ -f ${CWDIR}/master.zip ]; then
+		if [ ! -f ${PYTIVOPATH}${APPEXEC} ]; then
+			echo "Extracting ${APPNAME}..."
+			tar -xf ${CWDIR}/master.zip -C ${PYTIVOPATH} --strip-components 1 || \
+			error_notify "Error: A problem has occurred while extractig ${APPNAME} files."
+			chmod 555 ${PYTIVOPATH}/${APPEXEC}
+			rm -f ${CWDIR}/master.zip
+			echo "Done!"
+		fi
+	fi
+}
+
+ext_initial_download()
+{
+	# Always ensure the version file is present, otherwise update the extension files on startup.
+	if [ ! -f ${CWDIR}/version ]; then
+		echo "Fetching and extracting extension files..."
+		mkdir -p ${CWDIR}/update
+		fetch -ao ${CWDIR}/update --no-verify-peer --timeout=30 ${GITURL} || \
+		error_notify "Error: A problem has occurred while fetching extension package."
+		tar -xf ${CWDIR}/update/*${BRANCH}.zip --exclude='.git*' --strip-components 1 -C ${CWDIR}/update
+		chmod +x ${CWDIR}/update/${SCRIPTNAME}
+		cp -rf ${CWDIR}/update/* ${CWDIR}/
+		rm -r ${CWDIR}/update
+		echo "Done!"
+	fi
+}
+
+extension_upgrade()
+{
+	# Perform an online extension upgrade.
+	DATE=$(date +"%a %b %d %T %Y")
+	echo "Looking for new ${FULLAPPNAME} package!"
+	mkdir -p ${CWDIR}/update
+	fetch -ao ${CWDIR}/update --no-verify-peer --timeout=30 ${VERFILE} || \
+	error_notify "Error: A problem has occurred while fetching version file."
+
+	# Compare version files and fetch latest package if available.
+	if [ -f ${CWDIR}/update/version ]; then
+		UPDATEVER=$(cat ${CWDIR}/update/version | tr -d .)
+		CURRENTVER=$(cat ${CWDIR}/version | tr -d .)
+		if [ "${UPDATEVER}" -gt "${CURRENTVER}" ]; then
+			echo "New ${FULLAPPNAME} package found, performing upgrade..."
+			fetch -ao ${CWDIR}/update --no-verify-peer --timeout=30 ${GITURL} || \
+			error_notify "Error: A problem has occurred while fetching extension package."
+			tar -xf ${CWDIR}/update/*${BRANCH}.zip --exclude='.git*' --strip-components 1 -C ${CWDIR}/update
+			chmod +x ${CWDIR}/update/${SCRIPTNAME}
+			cp -Rf ${CWDIR}/update/* ${CWDIR}/
+			rm -r ${CWDIR}/update
+
+			# Logging the update event.
+			UPDATEVERSION=$(cat ${CWDIR}/version)
+			echo "${DATE}: ${FULLAPPNAME} upgraded to ${UPDATEVERSION}" >> ${EXTLOGFILE}
+			echo "${FULLAPPNAME} package upgrade completed!"
+		else
+			echo "${FULLAPPNAME} is on the latest version!"
+			rm -r ${CWDIR}/update
+		fi
+	fi
+}
+
+product_check()
+{
+	# Check for the working product.
+	if [ "${PRODUCT}" = "NAS4FREE-x64" ] || [ "${PRODUCT}" = "XIGMANAS-x64" ]; then
+		create_addon_env
+		ext_initial_download
+		pytivo_initial_download
+		postinit_cmd
+		gui_start
+	fi
+}
+
+create_addon_env()
+{
+	# Create required directories.
+	if [ ! -d ${CWDIR}/conf ]; then
+		mkdir -p ${CWDIR}/conf
+	fi
+	if [ ! -d ${CWDIR}/locale-pytivo ]; then
+		mkdir -p ${CWDIR}/locale-pytivo
+	fi
+	if [ ! -d ${CWDIR}/log ]; then
+		mkdir -p ${CWDIR}/log
+	fi
+	if [ ! -d ${CWDIR}/${APPNAME} ]; then
+		mkdir -p ${CWDIR}/${APPNAME}
+	fi
+
+	# Link pytivoinit to /usr/local/sbin.
+	if [ ! -f ${USRLOCAL}/sbin/${SCRIPTNAME} ]; then
+		ln -fs ${CWDIR}/${SCRIPTNAME} ${USRLOCAL}/sbin/${SCRIPTNAME}
+	fi
+}
+
+postinit_cmd()
+{
+	# Check and generate temporary php script for postinit command.
+	if ! grep -qw ${CWDIR}/${SCRIPTNAME} ${CONFIG}; then
+		touch ${CWDIR}/postinit || error_notify "Error: A problem has occurred while creating the postinit file."
+		chmod +x ${CWDIR}/postinit
+		if [ ! "${PRDVERSION}" -ge "110" ]; then
+			# Generate php script for NAS4Free 10.3 versions.
+			cat << EOF > ${CWDIR}/postinit
+<?php
+require_once("config.inc");
+require_once("functions.inc");
+\$cmd = dirname(__FILE__)."/${SCRIPTNAME}";
+	\$i =0;
+	if ( is_array(\$config['rc']['postinit'] ) && is_array( \$config['rc']['postinit']['cmd'] ) ) {
+		for (\$i; \$i < count(\$config['rc']['postinit']['cmd']);) {
+			if (preg_match('/${SCRIPTNAME}/', \$config['rc']['postinit']['cmd'][\$i])) break; ++\$i; }
+	}
+	\$config['rc']['postinit']['cmd'][\$i] = \$config['cmd']."\$cmd";
+	write_config();
+?>
+EOF
+		else
+			# Generate php script for NAS4Free/XigmaNAS 11.x versions.
+			cat << EOF > ${CWDIR}/postinit
+<?php
+require_once("config.inc");
+require_once("functions.inc");
+\$cmd = dirname(__FILE__)."/${SCRIPTNAME}";
+\$name = "${FULLAPPNAME} Extension";
+\$comment = "Start ${FULLAPPNAME}";
+\$rc = &array_make_branch(\$config,'rc','param'); 
+if(false === array_search_ex(\$name,\$rc,'name')):
+	\$rc_param = [];
+	\$rc_param['uuid'] = uuid();
+	\$rc_param['name'] = \$name;
+	\$rc_param['value'] = \$cmd;
+	\$rc_param['comment'] = \$comment;
+	\$rc_param['typeid'] = '2';
+	\$rc_param['enable'] = true;
+	\$rc[] = \$rc_param;
+	write_config();
+endif;
+unset(\$rc);
+?>
+EOF
+		fi
+
+		# Execute temporary php script.
+		if [ "${OBI_INSTALL}" != "ON" ]; then
+			echo "Creating postinit command..."
+			php-cgi -f ${CWDIR}/postinit && rm ${CWDIR}/postinit || \
+			error_notify "Error: A problem has occurred while executing postinit file."
+			echo "Done!"
+		fi
+		sysrc -f ${CWDIR}${PYTIVOCONF} GUI_ENABLE=YES INSTALL_DIR=${CWDIR} >/dev/null 2>&1
+	fi
+}
+
+gui_start()
+{
+	# Initialize the extension gui.
+	if [ -d "${CWDIR}/gui" ]; then
+		# Always ensure the config directory/file exist.
+		if [ ! -f "${CWDIR}${PYTIVOCONF}" ]; then
+			# Try to restore default configuration.
+			runtime_config
+			# Set default config.
+			sysrc -f ${CWDIR}${PYTIVOCONF} GUI_ENABLE=YES INSTALL_DIR=${CWDIR} >/dev/null 2>&1
+		fi
+		GUI_STATUS=$(sysrc -f ${CWDIR}${PYTIVOCONF} -qn GUI_ENABLE)
+		if [ "${GUI_STATUS}" = "YES" ]; then
+			# Store the installation path and link conf.
+			if ! sysrc -f ${CWDIR}${PYTIVOCONF} -n INSTALL_DIR | grep -q "${CWDIR}"; then
+				sysrc -f ${CWDIR}${PYTIVOCONF} INSTALL_DIR=${CWDIR} >/dev/null 2>&1
+			fi
+			mkdir -p ${PYTIVOCONFLINK}
+			ln -Ffhs ${CWDIR}/conf ${PYTIVOCONFLINK}/conf
+			# Copy the gui files.
+			cp -R ${CWDIR}/gui/* ${WWWPATH}/ || error_notify "Error: A problem has occurred while copying extension gui files."
+		fi
+	fi
+}
+
+gui_enable()
+{
+	# Relink conf and copy the gui files.
+	if [ -d "${CWDIR}/gui" ]; then
+		mkdir -p ${PYTIVOCONFLINK}
+		ln -Ffhs ${CWDIR}/conf ${PYTIVOCONFLINK}/conf
+		sysrc -f ${CWDIR}${PYTIVOCONF} GUI_ENABLE=YES >/dev/null 2>&1
+		cp -R ${CWDIR}/gui/* ${WWWPATH}/ || error_notify "Error: A problem has occurred while copying extension gui files."
+		exit 0
+	else
+		error_notify "Error: Extension gui files not found."
+	fi
+}
+
+gui_disable()
+{
+	# Disable gui if -t option specified.
+	if [ -d "${CWDIR}/gui" ]; then
+		rm -f ${WWWPATH}/pytivo-gui.php
+		rm -rf ${WWWPATH}/ext/pytivo-gui
+		rm -f ${LOCALSHAREPATH}/locale-pytivo
+		rm -rf ${PYTIVOCONFLINK}
+		sysrc -f ${CWDIR}${PYTIVOCONF} GUI_ENABLE=NO >/dev/null 2>&1 || error_notify "Error: A problem while removing extension gui files."
+		exit 0
+	else
+		error_notify "Error: Extension gui files not found."
+	fi
+
+	# Remove empty ext folder to prevent empty "Extensions" tab.
+	if [ -d "${WWWPATH}/ext" ]; then
+		if [ ! "$(ls -A ${WWWPATH}/ext)" ]; then
+			rm -r ${WWWPATH}/ext
+		fi
+	fi
+}
+
+ext_enable_disable()
+{
+	# Start pytivo extension gui if enabled otherwise start pytivo cli version.
+	if [ -d "${CWDIR}/gui" ]; then
+		GUI_STATUS=$(sysrc -f ${CWDIR}${PYTIVOCONF} -qn GUI_ENABLE)
+		if [ "${GUI_STATUS}" = "YES" ]; then
+			PYTIVO_ENABLE=$(sysrc -f ${CWDIR}${PYTIVOCONF} -qn PYTIVO_ENABLE)
+			if [ "${PYTIVO_ENABLE}" = "NO" ]; then
+				exit 0
+			fi
+		else
+			break
+		fi
+	fi
+}
+
+pkg_upgrade()
+{
+	# Re-fetch pytivo package and extract.
+	echo "Preparing to overwrite current pytivo files, except configuration..."
+	pytivo_force_download
+
+	# Check for extension updates.
+	extension_upgrade
+}
+
+remove_addon()
+{
+	# Confirm for addon removal.
+	while :
+		do
+			read -p "Do you wish to proceed with the ${FULLAPPNAME} removal? [y/N]:" yn
+			case ${yn} in
+			[Yy]) break;;
+			[Nn]) exit 0;;
+			esac
+		done
+	echo "Proceeding..."
+	if pgrep -qf ${APPNAME}; then
+		pkill -f ${APPNAME}
+	fi
+
+	if [ -f "${WWWPATH}/pytivo-gui.php" ]; then
+		rm -f ${WWWPATH}/pytivo-gui.php
+		rm -rf ${WWWPATH}/ext/pytivo-gui
+		rm -f ${LOCALSHAREPATH}/locale-pytivo
+		rm -rf ${PYTIVOCONFLINK}
+	fi
+
+	# Remove addon related files and folders only-
+	# to protect any user-created custom files.
+	FILES="conf download gui locale-pytivo log pytivo README.md postinit release_notes update version pytivoinit pytivoversion"
+	for file in ${FILES}; do
+		if [ -f ${CWDIR}/${file} ] || [ -d ${CWDIR}/${file} ]; then
+			rm -rf ${CWDIR}/${file}
+		fi
+	done
+
+	if [ ! -f ${USRLOCAL}/sbin/${SCRIPTNAME} ]; then
+		rm ${USRLOCAL}/sbin/${SCRIPTNAME}
+	fi
+
+	echo "Done!"
+	echo "Please manually remove the PyTivo Extension Command Script from the WebGUI."
+	exit 0
+}
+
+reset_install()
+{
+	# Reset the extension environment.
+	echo "Removing extension files..."
+	if [ -d ${CWDIR}/conf ]; then
+		rm -rf ${CWDIR}/conf
+	fi
+	if [ -d ${CWDIR}/log ]; then
+		rm -rf ${CWDIR}/log
+	fi
+	if [ -d ${CWDIR}/locale-pytivo ]; then
+		rm -rf ${CWDIR}/locale-pytivo
+	fi
+	if [ -d ${CWDIR}/${APPNAME} ]; then
+		rm -rf ${CWDIR}/${APPNAME}
+	fi
+	if [ -f ${CWDIR}/version ]; then
+		rm -f ${CWDIR}/version
+	fi
+
+	if [ -f "${WWWPATH}/pytivo-gui.php" ]; then
+		rm -f ${WWWPATH}/pytivo-gui.php
+		rm -rf ${WWWPATH}/ext/pytivo-gui
+		rm -f ${LOCALSHAREPATH}/locale-pytivo
+		rm -rf ${PYTIVOCONFLINK}
+	fi
+
+	runtime_config
+}
+
+get_versions()
+{
+	# Get pytivo-addon extension version.
+	if [ -f "${CWDIR}/version" ]; then
+		APPVERSION=$(cat ${CWDIR}/version)
+	else
+		APPVERSION="version file not found!"
+	fi
+
+	# Display product versions.
+	echo "pytivo version: ${PYTIVOVERSION}"
+	echo "extension version: ${APPVERSION}"
+	exit 0
+}
+
+pytivo_rc_start()
+{
+	# Start pitivo if enabled.
+	if ! pgrep -qf ${APPNAME}; then
+		${PYTHONCMD} ${PYTIVOPATH}/${APPEXEC} &
+	fi
+
+	# Log on startup success, else logging with faults.
+	if [ $? -eq 0 ]; then
+		MSG="script has been started successfully!"
+		logger -t ${SCRIPTNAME} ${MSG}
+	else
+		MSG="script started with faults"
+		logger -t ${SCRIPTNAME} ${MSG}
+	fi
+}
+
+pytivo_init()
+{
+	# Check for system compatibility.
+	if [ ! "${PLATFORM}" = "amd64" ]; then
+		echo "Unsupported platform!"; exit 1
+	fi 
+	# Check for product compatibility.
+	if [ ! "${PRDVERSION}" -ge "110" ]; then
+		echo "Unsupported version!"; exit 1
+	fi
+
+	echo "Initializing ${FULLAPPNAME}..."
+
+	# Function calls.
+	product_check
+	ext_enable_disable
+	pytivo_rc_start
+}
+
+start_pytivo()
+{
+	if ! pgrep -qf ${APPNAME}; then
+		${PYTHONCMD} ${PYTIVOPATH}/${APPEXEC} &
+		exit 0
+	else
+		echo "${APPNAME}" is already running!
+		exit 1
+	fi
+}
+
+stop_pytivo()
+{
+	if pgrep -qf ${APPNAME}; then
+		pkill -f ${APPNAME}
+		exit 0
+	else
+		echo "${APPNAME}" is not running!
+		exit 1
+	fi
+}
+
+restart_pytivo()
+{
+	if pgrep -qf ${APPNAME}; then
+		pkill -f ${APPNAME} && ${PYTHONCMD} ${PYTIVOPATH}/${APPEXEC} &
+		exit 0
+	else
+		echo "${APPNAME}" is not running!
+		exit 1
+	fi
+}
+
+# Run-time configuration.
+runtime_config
+
+while getopts ":osprugtxdvh" option; do
+	case ${option} in
+		[h]) echo "Usage: ${SCRIPTNAME} -[option]";
+		echo "Options:"
+		echo "        -s  Start ${FULLAPPNAME}."
+		echo "        -p  Stop ${FULLAPPNAME}."
+		echo "        -r  Restart ${FULLAPPNAME}."
+		echo "        -u  Upgrade PyTivo/Extension packages."
+		echo "        -g  Enables the addon GUI."
+		echo "        -t  Disable the addon GUI."
+		echo "        -x  Reset ${FULLAPPNAME}."
+		echo "        -d  Uninstall ${FULLAPPNAME}."
+		echo "        -v  Display product version."
+		echo "        -h  Display this help message."; exit 0;;
+		[o]) OBI_INSTALL="ON";; # To prevent nested PHP-CGI call for installation with OBI.
+		[u]) pkg_upgrade;;
+		[s]) start_pytivo;;
+		[p]) stop_pytivo;;
+		[r]) restart_pytivo;;
+		[g]) gui_enable;;
+		[t]) gui_disable;;
+		[x]) reset_install;;
+		[d]) remove_addon;;
+		[v]) get_versions;;
+		[?]) echo "Invalid option, -h for usage."; exit 1;;
+	esac
+done
+pytivo_init
