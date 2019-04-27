@@ -257,7 +257,7 @@ EOF
 			error_notify "Error: A problem has occurred while executing postinit file."
 			echo "Done!"
 		fi
-		sysrc -f ${CWDIR}${PYTIVOCONF} GUI_ENABLE=YES INSTALL_DIR=${CWDIR} >/dev/null 2>&1
+		sysrc -f ${CWDIR}${PYTIVOCONF} PYTIVO_ENABLE=NO GUI_ENABLE=YES INSTALL_DIR=${CWDIR} >/dev/null 2>&1
 	fi
 }
 
