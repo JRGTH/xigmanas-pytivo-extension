@@ -60,7 +60,8 @@ $rootfolder = $cwdir;
 $configfile = "{$rootfolder}/conf/pytivo_config";
 $versionfile = "{$rootfolder}/version";
 $pytivoversion = "{$rootfolder}/pytivoversion";
-$date = strftime('%c');
+//$date = strftime('%c');                // Previous PHP versions, deprecated as of PHP 8.1.
+$date = date('D M d h:i:s Y', time());   // Equivalent date replacement for the previous strftime function.
 $logfile = "{$rootfolder}/log/pytivo_ext.log";
 $logevent = "{$rootfolder}/log/pytivo_last_event.log";
 
