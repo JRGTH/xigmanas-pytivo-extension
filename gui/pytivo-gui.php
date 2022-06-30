@@ -209,18 +209,18 @@ function get_version_pytivo() {
 	global $pytivoversion;
 	if (is_file("{$pytivoversion}")) {
 		exec("/bin/cat {$pytivoversion}", $result);
-		return ($result[0]);
+		return ($result[0] ?? '');
 	}
 	else {
 		exec("/usr/local/sbin/pkg info -I {$prdname}", $result);
-		return ($result[0]);
+		return ($result[0] ?? '');
 	}
 }
 
 function get_version_ext() {
 	global $versionfile;
 	exec("/bin/cat {$versionfile}", $result);
-	return ($result[0]);
+	return ($result[0] ?? '');
 }
 
 function get_process_info() {
